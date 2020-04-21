@@ -1,0 +1,386 @@
+---
+title: "Boston Housing Prices Prediction"
+author: Radhika Sood
+output:
+  html_document:
+  highlight: monochrome
+  pdf_document: default
+  code_folding: show
+  word_document: show
+---
+
+#Introduction{.tabset .tabset-fade .tabset-pills}
+*Source* - The information for the dataset is collected by the U.S Census Service concerning housing in the Boston Mass area. It was obtained from the StatLib archive. The [dataset](http://lib.stat.cmu.edu/datasets/boston) has been extensively used throughout the literature to benchmark algorithms. The dataset is small in size and has only 506 cases. The data was originally published by Harrison, D. and Rubinfeld, D.L. `Hedonic prices and the demand for clean air', J. Environ. Economics & Management, vol.5, 81-102, 1978.
+
+*Goal* - The goal of the project is to compare the performance of the machine learning algorithms.
+
+*Problem Statement*- The dataset had 14 variables which are listed in the later part of the report. In this, medv: median price of the house is the target variable. Using rest feature variables and machine learning algorithms, we will predict the medv value.
+![](https://upload.wikimedia.org/wikipedia/commons/thumb/9/96/ISH_WC_Boston4.jpg/1200px-ISH_WC_Boston4.jpg)
+
+
+## Data Preparation
+
+### Libraries used
+```{r message=FALSE, warning=FALSE, paged.print=FALSE}
+library(corrr)
+library(kableExtra)
+library(rattle)
+library(corrplot)
+library(adabag)
+library(dplyr)
+library(ggplot2)
+library(GGally)
+library(readxl)
+library(ggthemes)
+library(glmnet)
+library(tidyr)
+library(caTools)
+library(DT)
+library(randomForest)
+library(gbm)
+library(knitr)
+library(ROCR)
+library(leaps)
+library(PRROC)
+library(boot)
+library(naniar)
+library(psych)
+library(grid)
+library(ggplot2)
+library(lattice)
+library(caret) # Use cross-validation
+library(class)
+library(rpart) # Decision Tree
+library(rpart.plot)
+library(caretEnsemble)
+```
+
+
+### *Data Dictionary*
+```{r}
+data_dictionary <- read_excel("C:/Users/Radhika Sood/Desktop/R datasets/boston-house-prices/Boston_Data_Dictionary.xlsx")
+data_dictionary
+```
+
+
+### *Import*
+
+Importing the dataset
+```{r}
+column_names <- c('crim', 'zn', 'indus', 'chas', 'nox', 'rm', 'age', 'dis', 'rad', 'tax', 'ptratio', 'b', 'lstat', 'medv')
+housing <-read.csv("C:/Users/Radhika Sood/Desktop/R datasets/boston-house-prices/BostonHousing.csv",  stringsAsFactors = FALSE, header = TRUE)
+```
+
+*Dimensions of the data*
+```{r}
+dim(housing)
+```
+The dataset has 506 rows and 14 columns.
+
+The various column names in the dataset are:
+```{r}
+colnames(housing)
+```
+
+### Missing values
+```{r}
+naniar::gg_miss_var(iris) +
+theme_minimal()+
+labs(y = "Missing Values in the dataset")
+```
+The graph shows that there is no missing value.
+
+Glimse of the data:
+```{r}
+head(housing)
+```
+
+Summary of the dataset is
+```{r}
+summary(housing)
+```
+
+##Data Analysis
+It is important to visualize and find the relations between the data
+
+### Histogram
+```{r}
+housing %>%
+  gather(key = "var", value = "value") %>%
+  filter(var != "chas") %>%
+  ggplot(aes(x = value)) +
+  geom_histogram() +
+  facet_wrap(~ var, scales = "free")
+```
+From the histogram, we can observe Exponential distribution for age, dis and lstat variables and normal distribution for rm.
+ 
+### Scatterplot
+```{r}
+housing %>% gather(key, val,-medv) %>%
+  ggplot(aes(x=val, y = medv)) + geom_point() + stat_smooth(method = "lm", se = TRUE, col = "yellow") +
+  facet_wrap(~key, scales = "free") + ggtitle("Scatter plot of variables vs Median Value (medv)") 
+```
+
+There is positive linear relationaship is observed between the medv with rm.
+Negative linear relationaship is observed between the medv with age, crim,indus, lstat, nox, tax, ptratio, rad.
+
+### Boxplot
+```{r}
+housing %>%
+  gather(key = "var", value = "value") %>%
+  filter(var != "chas") %>%
+  ggplot(aes(x = '',y = value)) +
+  geom_boxplot(outlier.colour = "red") +
+  facet_wrap(~ var, scales = "free")
+```
+
+### Correlation
+
+Lets check correlation between the variables. 
+
+```{r echo=FALSE, message=FALSE}
+pairs.panels(housing,pch=20)
+corrplot(cor(housing), type = "lower", method = "number", number.cex=0.6)
+```
+
+Observation: There is high correlation between the medv and rm.
+
+## Lasso Regression
+
+*Introduction* - Lasso regression performs L1 regularization, which adds a penality when a coefficient is added to the dataset and is equivalent to the absolute value of the maginitude of regression coefficiens. Lasso regression aims to minimize this penalty.
+Lasso is used when we have large number of predictor variables.
+
+*Standardizing* the dataset before applying the Machine learning algos
+
+```{r}
+housing<- scale(housing)
+summary(housing)
+```
+
+Split the data and apply the lasso regression
+```{r}
+split_data = sample(nrow(housing),nrow(housing)*0.80)
+train = housing[split_data,]
+test =  housing[-split_data,]
+```
+
+*Model Building*
+```{r}
+lasso_reg <- glmnet(x=as.matrix(train[,-14]), y=train[,14],alpha=1)
+```
+
+*Plotting lasso regression*
+```{r}
+matplot(lasso_reg$lambda,t(lasso_reg$beta),type="l",ylab="coefficient",xlab="lambda")
+abline(h=0)
+plot(lasso_reg)
+```
+
+As the value of the lambda increases, the coefficients shrink to zero.
+
+*Cross validation*
+
+We can apply cross-validation to find the best cv
+
+Step 1: Plot mse vs lambda
+```{r}
+
+cv_fit <- cv.glmnet(x=as.matrix(train[,-14]), y=train[,14],alpha=1, nfolds=6)
+plot(cv_fit)
+```
+
+Step 2: The optimal lambda is:
+```{r}
+opt_lambda <- cv_fit$lambda.min
+opt_lambda
+```
+
+
+*The coefficients from the lasso regression are*
+```{r}
+coef(cv_fit,s = cv_fit$lambda.min)
+```
+
+Lasso removes the unnecessary variables from the model.
+
+Storing train and test mse
+```{r}
+old_x <- as.matrix(train[,-14])
+pred_train <- predict(cv_fit, s = opt_lambda, newx = old_x)
+pred_test <- predict(cv_fit, s = opt_lambda, newx = as.matrix(test[,-14]))
+```
+
+In sample MSE is:
+```{r}
+value <- c(train[,14])
+train_mse <- mean((pred_train - value)^2)
+train_mse
+```
+
+Out of sample MSE is:
+```{r}
+value <- c(test[,14])
+test_mse <- mean((pred_test-value)^2)
+test_mse
+```
+
+
+The training and test MSE are:
+
+```{r}
+train_mse
+test_mse
+```
+
+## Regression Tree
+
+cp = .001 indicates that the  split should minimise the overall lack of fit by a factor of 0.001 (cost complexity factor)
+
+```{r}
+train <- data.frame(as.matrix(train))
+boston.rpart <- rpart(medv ~ ., data = train, cp = .001)
+```
+
+Printing the plot
+```{r}
+prp(boston.rpart, digit= 4)
+```
+To get the optimal value of cp 
+
+```{r}
+plotcp(boston.rpart)
+```
+
+
+```{r}
+printcp(boston.rpart)
+```
+
+For cp = 0.0042164, provides the relevant size of split = 11
+
+Building a pruned regression tree for size = 11 and cp = 0.0042164, 0.0039381(12)
+```{r}
+regression_tree_model <- prune(boston.rpart, cp = 0.0042164)
+```
+
+ 
+In-sample prediction
+```{r}
+boston.train.pred.tree = predict(boston.rpart)
+```
+
+Out-of-sample prediction
+```{r}
+test <- data.frame(as.matrix(test))
+boston.test.pred.tree = predict(boston.rpart,test)
+```
+
+MSE for in-sample and out of sample prediction
+```{r}
+tree_train_mse <- mean((boston.train.pred.tree-train$medv)^2)
+tree_test_mse <- mean((boston.test.pred.tree-test$medv)^2)
+```
+
+MSE values for train and test samples are:
+```{r}
+tree_train_mse
+tree_test_mse
+```
+
+
+## Random Forest
+Random Forest removes the multicollinearity between the trees, and hence further reducing the variance
+
+We need to find two parameters for random forest:
+Number of Trees: We create upto a maximum of 500 trees
+Number of Variables at each step: We chose the default best size of 4
+
+```{r}
+library(randomForest)
+rf_model<- randomForest(medv~., data = train,mtry = 6, subset = TRUE, importance=TRUE)
+rf_model
+```
+
+Check the importance of each variable
+```{r}
+rf_model$importance
+varImpPlot(rf_model)
+```
+
+Plot out of bag error vs the number of trees to get the optimal value for the number of trees. 
+```{r}
+plot(rf_model$mse, type='l', col=2, lwd=2, xlab = "ntree", ylab = "OOB Error")
+```
+Optimal value for the Ntree should be 300 for this case.
+
+Plotting test mse vs no. of predictor variables to select the optimal value. 
+  
+```{r}
+oob.err<- rep(0, 13)
+for(i in 1:13){
+  fit<- randomForest(medv~., data = train, mtry=i, ntree=300)
+  oob.err[i]<- fit$mse[200] #oob error for ntree=200
+}
+
+matplot(oob.err, pch=15, col = "red", type = "b", ylab = "MSE", xlab = "mtry")
+legend("topright", legend = c("OOB Error"), pch = 15, col = c("red"))
+
+```
+According to this graph, mtry should be 5.
+
+Creating the random forest 
+
+```{r}
+Pre <- as.formula("medv ~ .")
+rf <- randomForest(Pre,data=train, mtry=5, ntree=300, importance =TRUE)
+```
+
+The random forest has test error of:
+```{r}
+rf_train_pred = predict(rf)
+rf_test_pred = predict(rf, test)
+rf_test_mse <- mean((rf_test_pred - test[,14])^2)
+rf_test_mse
+```
+The random forest has training error of:
+```{r}
+rf_train_mse <- mean((rf_train_pred - train[,14])^2)
+rf_train_mse
+```
+
+### Boosting
+
+In the classification case, we may grow many trees with only a single split and while any given tree has fairly low predictive power, as we add more trees and continue to learn slowly, the result can be a model with high predictive ability.
+
+Number of trees: 10000
+shrinkage: 0.01
+Tree depth: 8
+rm and lstat are the most influential variables
+```{r}
+df<-data.frame(as.matrix(train))
+test<-data.frame(as.matrix(test))
+
+boosting<- gbm(medv ~., data = df,  distribution = "gaussian", n.trees = 10000,interaction.depth = 8, shrinkage = .01 )
+summary(boosting)
+```
+
+Prediction using the boosting algorithm: 
+```{r}
+ntree <- seq (100, 1000, 100)
+pred_test = predict(boosting, newdata=test, n.trees=ntree)
+boosting_mse <- mean((pred_test-test[,14])^2)
+```
+
+
+Use cross validation to find the optimal number of trees
+```{r}
+model <- gbm(medv~., data = df, distribution = "gaussian", n.trees=5000, interaction.depth=4, shrinkage = 0.01, verbose=F, cv.folds=5)
+bestTreeForPrediction <- gbm.perf(model)
+
+```
+
+
+```{r}
+pred_tree = predict(model, newdata = test,n.trees = bestTreeForPrediction)
+round(mean((pred_tree-test[,14])^2),2)
+```
